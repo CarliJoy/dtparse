@@ -1,0 +1,42 @@
+[project]
+name = "dtparse"
+description = "Fast datetime parser for Python written in Rust. Parses 10x-15x faster than `datetime.strptime`."
+version = "1.4"
+classifiers=[
+    'Development Status :: 3 - Alpha',
+    'Intended Audience :: Developers',
+    'Programming Language :: Python',
+    'Programming Language :: Rust',
+]
+requires-python = ">=3.6"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[build-system]
+requires = ["setuptools", "setuptools-rust"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages]
+# Pure Python packages/modules
+find = { where = ["src"] }
+
+[[tool.setuptools-rust.ext-modules]]
+# Private Rust extension module to be nested into the Python package
+target = "dtparse._dtparse"  # The last part of the name (e.g. "_lib") has to match lib.name in Cargo.toml,
+                             # but you can add a prefix to nest it inside of a Python package.
+
+[dependency-groups]
+test = [
+    'ciso8601',
+    'pytest',
+    'pytest-benchmark[histogram]',
+]
+dev = [
+    {include-group = "test"},
+]
+
+
+[tool.pytest.ini_options]
+addopts = "--benchmark-histogram --benchmark-min-time=0.00000001 --benchmark-calibration-precision=1"

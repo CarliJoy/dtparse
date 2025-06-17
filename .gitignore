@@ -4,7 +4,6 @@
 .python-version
 __pycache__
 *.so
-Cargo.lock
 .benchmarks/
 .cache/
 *.egg-info/
