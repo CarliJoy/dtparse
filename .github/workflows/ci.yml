@@ -9,114 +9,181 @@ on:
   pull_request: {}
 
 jobs:
-  build:
-    name: build py${{ matrix.python-version }} on ${{ matrix.platform || matrix.os }}
+  test:
+    runs-on: ubuntu-latest
+    name: test py${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu
-          - macos
-          - windows
-        python-version:
-          - '3.6'
-          - '3.7'
-          - '3.8'
-          - '3.9'
-        wheels-dir:
-          - '.wheels'
-        include:
-          - os: ubuntu
-            platform: linux
-          - os: windows
-            ls: dir
-          - python-version: 3.6
-            cibw-version: cp36
-          - python-version: 3.7
-            cibw-version: cp37
-          - python-version: 3.8
-            cibw-version: cp38
-          - python-version: 3.9
-            cibw-version: cp39
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
 
-    runs-on: ${{ format('{0}-latest', matrix.os) }}
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+
     steps:
-      - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
-      - name: set up python
-        uses: actions/setup-python@v1
+    - uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+
+    - uses: dtolnay/rust-toolchain@stable
+
+    - id: cache-rust
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: v1
+
+    - run: uv sync --frozen
+
+    - run: uv run pytest
+
+  # https://github.com/marketplace/actions/alls-green#why used for branch protection checks
+  check:
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
         with:
-          python-version: ${{ matrix.python-version }}
+          jobs: ${{ toJSON(needs) }}
 
-      - name: set up rust
-        uses: actions-rs/toolchain@v1
+  build:
+    name: build os=${{ matrix.os }} target=${{ matrix.target }} int=${{ matrix.interpreter || 'all' }} ml=${{ matrix.manylinux || 'auto' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            target: x86_64
+          - os: linux
+            target: aarch64
+          - os: linux
+            target: i686
+          - os: linux
+            target: armv7
+          - os: linux
+            target: ppc64le
+          - os: linux
+            target: s390x
+
+          # musllinux
+          - os: linux
+            manylinux: musllinux_1_1
+            target: x86_64
+          - os: linux
+            manylinux: musllinux_1_1
+            target: aarch64
+
+          # macos
+          - os: macos
+            target: x86_64
+          - os: macos
+            target: aarch64
+
+          # windows
+          - os: windows
+            target: x86_64
+          - os: windows
+            target: i686
+            python-architecture: x86
+          - os: windows
+            target: aarch64
+            interpreter: 3.11 3.12 3.13
+
+    runs-on: ${{ (matrix.os == 'linux' && 'ubuntu') || matrix.os }}-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        architecture: ${{ matrix.python-architecture || 'x64' }}
+
+    - run: pip install -U twine
+
+    - name: build sdist
+      if: ${{ matrix.os == 'linux' && matrix.target == 'x86_64' }}
+      uses: PyO3/maturin-action@v1
+      with:
+        command: sdist
+        args: --out dist
+
+    - name: build wheels
+      uses: PyO3/maturin-action@v1
+      with:
+        target: ${{ matrix.target }}
+        manylinux: ${{ matrix.manylinux || 'auto' }}
+        args: --release --out dist --interpreter ${{ matrix.interpreter || '3.6 3.7 3.8 3.9 3.10 3.11 3.12 3.13' }}
+        rust-toolchain: stable
+        docker-options: -e CI
+      env:
+        # see https://github.com/PyO3/maturin/issues/2110
+        XWIN_VERSION: '16'
+
+    - run: ${{ (matrix.os == 'windows' && 'dir') || 'ls -lh' }} dist/
+
+    - run: twine check --strict dist/*
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: pypi_files-${{ matrix.os }}-${{ matrix.target }}-${{ matrix.interpreter || 'all' }}-${{ matrix.manylinux || 'auto' }}
+        path: dist
+
+  inspect-pypi-assets:
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
         with:
-          toolchain: 1.50.0
-          profile: minimal
-          default: true
-          override: true
+          pattern: pypi_files-*
+          merge-multiple: true
+          path: dist
 
-      - name: install python dependencies
+      - name: list dist files
         run: |
-          pip install -U setuptools setuptools-rust wheel cibuildwheel==1.7.0
+         ls -lh dist/
+         echo "`ls dist | wc -l` files"
 
-      - name: build sdist
+      - name: extract and list sdist file
         run: |
-          python setup.py sdist
+         mkdir sdist-files
+         tar -xvf dist/*.tar.gz -C sdist-files
+         tree -a sdist-files
 
-      - name: create wheels dir
+      - name: extract and list wheel file
         run: |
-          mkdir ${{ matrix.wheels-dir }}
+         ls dist/*cp312-manylinux*x86_64.whl | head -n 1
+         python -m zipfile --list `ls dist/*cp312-manylinux*x86_64.whl | head -n 1`
 
-      - name: build ${{ matrix.platform || matrix.os }} binaries
-        run: python -m cibuildwheel --output-dir ${{ matrix.wheels-dir }}
-        env:
-          CIBW_BUILD: '${{ matrix.cibw-version }}-*'
-          CIBW_SKIP: '*-win32'
-          CIBW_PLATFORM: ${{ matrix.platform || matrix.os }}
-          CIBW_ENVIRONMENT: 'PATH="$HOME/.cargo/bin:$PATH"'
-          CIBW_ENVIRONMENT_WINDOWS: 'PATH="$UserProfile\.cargo\bin;$PATH"'
-          CIBW_BEFORE_BUILD: >
-            rustup show
-          CIBW_BEFORE_BUILD_LINUX: >
-            curl https://sh.rustup.rs -sSf | sh -s -- --profile=minimal -y &&
-            rustup show
-          CIBW_TEST_COMMAND: "pytest {project}/tests"
-          CIBW_TEST_EXTRAS: test
+      - run: pip install twine
+      - run: twine check dist/*
 
-      - name: build windows 32bit binaries
-        if: matrix.os == 'windows'
-        run: cibuildwheel --output-dir ${{ matrix.wheels-dir }}
-        env:
-          CIBW_BUILD: '${{ matrix.cibw-version }}-win32'
-          CIBW_PLATFORM: windows
-          CIBW_ENVIRONMENT: 'PATH="$UserProfile\.cargo\bin;$PATH"'
-          CIBW_BEFORE_BUILD: >
-            rustup default stable-i686-pc-windows-msvc &&
-            rustup show
-          CIBW_TEST_COMMAND: "pytest {project}/tests"
-          CIBW_TEST_EXTRAS: test
+  release:
+    needs: [check, build, inspect-pypi-assets]
+    if: "success() && startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    environment: release
 
-      - name: list wheels
-        run: ${{ matrix.ls || 'ls -lh' }} ${{ matrix.wheels-dir }}
+    permissions:
+      id-token: write
 
-      - name: twine check
-        run: |
-          pip install -U twine
-          twine check ${{ matrix.wheels-dir }}/*
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Upload to github releases
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
+      - name: get dist artifacts
+        uses: actions/download-artifact@v4
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ matrix.wheels-dir }}/*
-          file_glob: true
-          tag: ${{ github.ref }}
+          pattern: pypi_files-*
+          merge-multiple: true
+          path: dist
 
-      - name: upload to pypi
-        if: startsWith(github.ref, 'refs/tags/')
-        run: twine upload ${{ matrix.wheels-dir }}/*
-        env:
-          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      - run: ls -lh dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.12.3
