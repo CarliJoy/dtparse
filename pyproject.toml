@@ -8,24 +8,14 @@ classifiers=[
     'Programming Language :: Python',
     'Programming Language :: Rust',
 ]
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 
 [build-system]
-requires = ["setuptools", "setuptools-rust"]
-build-backend = "setuptools.build_meta"
-
-
-[tool.setuptools.packages]
-# Pure Python packages/modules
-find = { where = ["src"] }
-
-[[tool.setuptools-rust.ext-modules]]
-# Private Rust extension module to be nested into the Python package
-target = "dtparse._dtparse"  # The last part of the name (e.g. "_lib") has to match lib.name in Cargo.toml,
-                             # but you can add a prefix to nest it inside of a Python package.
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
 
 [dependency-groups]
 test = [
@@ -37,6 +27,9 @@ dev = [
     {include-group = "test"},
 ]
 
+[tool.maturin]
+python-source = "python"
+module-name = "dtparse._dtparse"
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-histogram --benchmark-min-time=0.00000001 --benchmark-calibration-precision=1"
