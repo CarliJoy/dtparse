@@ -1,0 +1,35 @@
+[project]
+name = "dtparse"
+description = "Fast datetime parser for Python written in Rust. Parses 10x-15x faster than `datetime.strptime`."
+version = "1.4"
+classifiers=[
+    'Development Status :: 3 - Alpha',
+    'Intended Audience :: Developers',
+    'Programming Language :: Python',
+    'Programming Language :: Rust',
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[dependency-groups]
+test = [
+    'ciso8601',
+    'pytest',
+    'pytest-benchmark[histogram]',
+]
+dev = [
+    {include-group = "test"},
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "dtparse._dtparse"
+
+[tool.pytest.ini_options]
+addopts = "--benchmark-histogram --benchmark-min-time=0.00000001 --benchmark-calibration-precision=1"
